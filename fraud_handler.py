@@ -30,17 +30,21 @@ for message in consumer:
     # Some alerts might have transaction_id, amount, etc.
     transaction_id = fraud_alert.get('transaction_id', 0)  # Default if missing
     amount = fraud_alert.get('amount', 0.0)  # Default if missing
-    
+    timestamp = fraud_alert.get('timestamp', None)  # Default if missing
+    location = fraud_alert.get('location', None)  # Default if missing
+    reason = fraud_alert.get('reason', 'Unusual Amount Detected')  # Default if missing
     # Generate a timestamp if not present
     current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     
-    sql = "INSERT INTO frauds (transaction_id, user_id, amount, timestamp, location) VALUES (%s, %s, %s, %s, %s)"
+    sql = "INSERT INTO frauds (transaction_id, user_id, amount, timestamp, location,reason) VALUES (%s, %s, %s, %s, %s,%s)"
     values = (
         transaction_id,
         user_id,
         amount,
-        current_time,
-        "UNKNOWN"  # Location might not be available in fraud alerts
+        timestamp,
+        location,
+        reason
+        
     )
     
     try:

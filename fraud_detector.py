@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import from_json, col, window, count, expr, to_timestamp
 from pyspark.sql.types import StructType, StructField, IntegerType, DoubleType, StringType
-
+from pyspark.sql.functions import date_format
 # Initialize SparkSession with Kafka package
 spark = SparkSession.builder \
     .appName("AdvancedRealTimeFraudDetection") \
@@ -38,25 +38,28 @@ parsed = transactions.selectExpr("CAST(value AS STRING) as json") \
 # 1️⃣ High Frequency Fraud Detection
 # -------------------------------
 high_freq_txns = parsed \
-    .withWatermark("event_time", "10 seconds") \
+    .withWatermark("event_time", "15 minutes") \
     .groupBy(
-        window(col("event_time"), "10 seconds"),
+        window(col("event_time"), "15 minutes"),
         col("user_id")
     ).agg(count("*").alias("txn_count")) \
-    .filter(col("txn_count") > 5) \
+    .filter(col("txn_count") > 3) \
+    .withColumn("timestamp", date_format(col("window.end"), "yyyy-MM-dd HH:mm:ss")) \
     .select(
         col("user_id"),
+        col("txn_count"),
+        col("timestamp"),
         expr("'High Transaction Frequency' as reason")
     )
 
 high_freq_output = high_freq_txns.selectExpr(
-    "to_json(named_struct('user_id', user_id, 'reason', reason)) AS value"
+    "to_json(named_struct('user_id', user_id, 'txn_count', txn_count, 'timestamp', timestamp, 'reason', reason)) AS value"
 )
 
 high_freq_query = high_freq_output.writeStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:9092") \
-    .option("topic", "fraud-alerts") \
+    .option("topic", "fraud-alert-hf") \
     .option("checkpointLocation", "C:\\Users\\joshi\\Desktop\\DBT\\project\\checkpoints\\fraud-alerts-highfreq") \
     .outputMode("append") \
     .start()
@@ -64,16 +67,18 @@ high_freq_query = high_freq_output.writeStream \
 # -------------------------------
 # 2️⃣ Amount Anomaly Detection
 # -------------------------------
-fraud_by_amount = parsed.filter(col("amount") > 900) \
+fraud_by_amount = parsed.filter(col("amount") > 90000) \
     .select(
         col("user_id"),
         col("transaction_id"),
         col("amount"),
+        col("location"),
+        col("timestamp"),
         expr("'Unusual Amount Detected' as reason")
     )
 
 amount_fraud_output = fraud_by_amount.selectExpr(
-    "to_json(named_struct('user_id', user_id, 'transaction_id', transaction_id, 'amount', amount, 'reason', reason)) AS value"
+    "to_json(named_struct('user_id', user_id, 'transaction_id', transaction_id, 'amount', amount, 'location',location,'reason', reason)) AS value"
 )
 
 amount_query = amount_fraud_output.writeStream \
@@ -86,7 +91,7 @@ amount_query = amount_fraud_output.writeStream \
 # -------------------------------
 # 3️⃣ Write Valid Transactions
 # -------------------------------
-valid_txns = parsed.filter(col("amount") <= 900)
+valid_txns = parsed.filter(col("amount") <= 90000)
 
 valid_output = valid_txns.selectExpr(
     "to_json(named_struct('transaction_id', transaction_id, 'user_id', user_id, 'amount', amount, 'timestamp', timestamp, 'location', location)) AS value"
